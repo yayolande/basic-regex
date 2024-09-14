@@ -3,97 +3,9 @@ package main
 import (
 	// "bufio"
 	"bytes"
-	"errors"
 	"fmt"
 	// "os"
 )
-
-type TokenKind int
-
-const (
-	TOKEN_IDENTIFIER TokenKind = iota
-	TOKEN_DOT
-	TOKEN_TERMINAL
-	TOKEN_UNKNOWN_TERMINAL
-	TOKEN_UNEXPECTED_OPERATOR_PLACE
-
-	TOKEN_OP_OR
-	TOKEN_OP_AND
-
-	TOKEN_REPEAT_STAR
-	TOKEN_REPEAT_STAR_ONCE
-	TOKEN_REPEAT_PLUS
-	TOKEN_REPEAT_PLUS_ONCE
-	TOKEN_REPEAT_QUESTION
-
-	TOKEN_OPEN_PARENTHESE
-	TOKEN_CLOSE_PARENTHESE
-
-	TOKEN_GROUP
-	TOKEN_GROUP_OPENER
-	TOKEN_GROUP_CLOSER
-	TOKEN_GROUP_PARENTHESE
-)
-
-var (
-	ERROR_MATCHING_OPERATOR_NOT_FOUND error = errors.New("Matching operator not found")
-	ERROR_UNARY_OPERATOR_FOUND_AT_UNEXPECTED_PLACE error = errors.New("Unary operator found at unexpected place")
-	ERROR_UNEXPECTED_CHARACTER_FOR_LEXER error = errors.New("Lexer was not able to identify a character")
-	ERROR_UNEXPECTED_TOKEN_FOR_PARSER error = errors.New("Parser was not able to identify the token(s)")
-)
-
-type LexerError struct {
-}
-
-type ParserError struct {
-	Err	error 
-	Node	*NodeTree
-}
-
-func (e ParserError) Error() string {
-	str := fmt.Sprintf("Error on Node : %s", e.Node)
-	str += fmt.Sprintf("\n message: %s", e.Err.Error())
-
-	return str
-}
-
-type Token struct {
-	Kind	TokenKind
-	Value	[]byte
-}
-
-func (t Token) String() string {
-	str := fmt.Sprintf("{\"Kind\": %d, \"Value\": %q}", int(t.Kind), t.Value)
-
-	return str
-}
-
-type NodeTree struct {
-	Kind	TokenKind
-	Value	Token
-	Childreen	[]NodeTree
-}
-
-func (n NodeTree) String() string {
-	if n.Childreen == nil {
-		str := fmt.Sprintf("{\"Kind\": %d, \"Value\": %s, \"Childreen\": %s}", n.Kind, n.Value,  "[]")
-
-		return str
-	}
-
-	arr := "["
-	for _, child := range n.Childreen {
-		// str = fmt.Sprintf("{\"Kind\": %d, \"Value\": %s, \"Childreen\": %s}", n.Kind, n.Value, n.Childreen)
-		arr += fmt.Sprintf("%s, ", child)
-	}
-
-	arr = arr[:len(arr) - 2]
-	arr += "]"
-
-	str := fmt.Sprintf("{\"Kind\": %d, \"Value\": %s, \"Childreen\": %s}", n.Kind, n.Value, arr)
-
-	return str
-}
 
 func main() {
 	/*
@@ -114,11 +26,12 @@ func main() {
 	}
 	*/
 
+	/*
 	str := ""
 	str = "a|b(c|d)"
 	str = "(albion+)+?belfast*?Ricar+(.*?)+.."
-	str = "(albion+?"
-	str = "albion+)dodo()("
+	// str = "(albion+?"
+	// str = "albion+)dodo()("
 
 	regex := []byte(str)
 	tokens, err := tokenize(regex)
@@ -126,35 +39,215 @@ func main() {
 		fmt.Printf("Tokenization error: %s", err.Error())
 	}
 
-
 	// fmt.Println(tokens)
 
-	// tree, errs := buildParseTree(tokens)
 	tree, errs := buildParseTree(tokens)
 	if errs != nil {
 		fmt.Println("Error parser: ", errs)
 	}
 
-	/*
-	if errs != nil {
-		// fmt.Printf("\n errors = %#v \n", errs)
+	fmt.Println(tree)
+	_ = tree
+	*/
 
-		for _, err := range errs {
-			fmt.Printf("\n errors = %#v \n", err.Error())
+	// text := []byte("hello")
+	// tree := new(NodeTree)
+
+	var reg []byte = nil
+	// reg = []byte("a|b|c|ab|a.")
+	reg = []byte("a(a|b|c)?")
+	lex, _ := tokenize(reg)
+	tree, _ := buildParseTree(lex)
+
+	text := []byte("abaaac")
+
+	matched := evaluateRegex(text, tree, nil)
+
+	var results []string
+	for _, match := range matched {
+		result := string(text[match.Start:match.End])
+		results = append(results, result)
+	}
+
+	fmt.Println("final results: ", results)
+}
+
+func evaluateRegex(text []byte, tree *NodeTree, data []RegexMatch) []RegexMatch {
+	if tree == nil {
+		fmt.Println("parent tree == nil")
+		return nil
+	}
+
+	if len(tree.Childreen) == 2 {
+		fmt.Println("childreen == 2")
+
+		switch tree.Kind {
+		case TOKEN_OP_AND:
+			data = evaluateRegex(text, &tree.Childreen[0], data)
+			data = evaluateRegex(text, &tree.Childreen[1], data)
+		case TOKEN_OP_OR:
+			right := evaluateRegex(text, &tree.Childreen[0], data)
+			left := evaluateRegex(text, &tree.Childreen[1], data)
+			data = append(right, left...)
+		default:
+			data = nil
+			fmt.Println("Unexpected error while evaluating regex for childreen == 2")
+		}
+
+		return data
+	}
+
+	if len(tree.Childreen) == 1 {
+		fmt.Println("childreen == 1")
+
+		if tree.Kind == TOKEN_OPEN_PARENTHESE {
+			data = evaluateRegex(text, &tree.Childreen[0], data)
+		} else if tree.Kind == TOKEN_REPEAT_PLUS || tree.Kind == TOKEN_REPEAT_PLUS_ONCE {
+			freshData := data
+			data = []RegexMatch{}
+
+			for {
+				freshData = evaluateRegex(text, &tree.Childreen[0], freshData)
+				if len(freshData) == 0 {
+					break
+				}
+
+				data = append(data, freshData...)
+			}
+		} else if tree.Kind == TOKEN_REPEAT_STAR || tree.Kind == TOKEN_REPEAT_STAR_ONCE {
+			freshData := data
+
+			for {
+				freshData = evaluateRegex(text, &tree.Childreen[0], freshData)
+				if len(freshData) == 0 {
+					break
+				}
+
+				data = append(data, freshData...)
+			}
+		} else if tree.Kind == TOKEN_REPEAT_QUESTION {
+			freshData := data
+
+			freshData = evaluateRegex(text, &tree.Childreen[0], freshData)
+
+			data = append(data, freshData...)
+		} else {
+			data = nil
+			fmt.Println("Unexpected error while evaluating regex for childreen == 1")
+		}
+
+		return data
+	}
+
+	// Terminal Node
+	var matched []RegexMatch
+
+	matcher := tree.Value.Value
+	if tree.Kind == TOKEN_DOT {
+		matcher = nil
+	}
+
+	if data == nil {
+		matched = matchFullText(text, matcher)
+	} else {
+		matched = matchPartialText(text, matcher, data)
+	}
+
+	fmt.Println("evaluate matched: ", matched)
+
+	return matched
+}
+
+// If matcher == nil, match every character
+func matchFullText (text []byte, matcher []byte) []RegexMatch {
+	matched := []RegexMatch{}
+
+	isDotOperator := matcher == nil
+
+	for index, _ := range text {
+		if isDotOperator {
+			if index < len(text) {
+				newMatch := RegexMatch { Start: index, End: index + 1 }
+				matched = append(matched, newMatch)
+			}
+
+			continue
+		}
+
+		if len(matcher) + index > len(text) {
+			break
+		}
+
+		counter := 0
+		for _, mat := range matcher {
+			char := text[index + counter]
+
+			if char == mat {
+				counter++
+
+				continue
+			}
+
+			counter = 0
+			break
+		}
+
+		if len(matcher) == counter {
+			// found a match from 'index' to 'index + counter'
+			// save the address and continue searching for other matches
+			newMatch := RegexMatch { Start: index, End: index + counter }
+			matched = append(matched, newMatch)
 		}
 	}
 
-	fmt.Println()
-	*/
+	fmt.Println("matched string: ", matched)
 
-	// fmt.Println(tokens)
+	return matched
+}
 
-	// fmt.Printf("regex: %q \ntokens : %q\n", regex, tokens)
-	// fmt.Printf("\nParseTree: \n %+v \n", tree)
-	fmt.Println(tree)
-	// fmt.Printf("\nParseTree: \n %s \n", tokens[0])
-	// fmt.Println("\nParseTree: \n ", tokens[0])
-	_ = tree
+// If matcher == nil, match every character
+func matchPartialText (text []byte, matcher []byte, starters []RegexMatch) []RegexMatch {
+	matched := []RegexMatch{}
+
+	isDotOperator := matcher == nil
+
+	for _, starter := range starters {
+		if isDotOperator {
+			if starter.End < len(text) {
+				newMatch := RegexMatch { Start: starter.Start, End: starter.End + 1 }
+				matched = append(matched, newMatch)
+			}
+
+			continue
+		}
+
+		start := starter.End
+
+		if start + len(matcher) > len(text) {
+			continue
+		}
+
+		counter := 0
+		for index, mat := range matcher {
+			char := text[start + index]
+			if char == mat {
+				counter++
+				continue
+			}
+
+			counter = 0
+			break
+		}
+
+		if counter == len(matcher) {
+			starter.End += counter
+			newMatch := RegexMatch { Start: starter.Start, End: starter.End }
+
+			matched = append(matched, newMatch)
+		}
+	}
+
+	return matched
 }
 
 func buildParseTree(tokens []Token) (*NodeTree, []error) {
@@ -164,12 +257,10 @@ func buildParseTree(tokens []Token) (*NodeTree, []error) {
 
 
 	if len(tokens) == 1 {
-		token := tokens[0]
-
-		parentNode := new (NodeTree)
-		parentNode.Kind = token.Kind
-		parentNode.Value = token
-		parentNode.Childreen = nil
+		parentNode, err := parseTerminalToken(tokens)
+		if err != nil {
+			return parentNode, []error { err }
+		}
 
 		return parentNode, nil
 	}
@@ -195,15 +286,15 @@ func buildParseTree(tokens []Token) (*NodeTree, []error) {
 
 	var parentNode *NodeTree
 	var parseErrors []error = nil
-	var err error = nil
+	var errs []error = nil
 
 	foundOperatorInTokenList := false
 
 	for _, operator := range operators {
 
-		parentNode, parseErrors = parseGroupOperator(operator, tokens)
-		if err != nil {
-			parseErrors = append(parseErrors, err)
+		parentNode, errs = parseGroupOperator(operator, tokens)
+		if errs != nil {
+			parseErrors = append(parseErrors, errs...)
 		}
 
 		if parentNode != nil {
@@ -212,8 +303,8 @@ func buildParseTree(tokens []Token) (*NodeTree, []error) {
 		}
 
 		parentNode, parseErrors = parseBinaryAndUnaryOperator(operator, tokens)
-		if err != nil {
-			parseErrors = append(parseErrors, err)
+		if errs != nil {
+			parseErrors = append(parseErrors, errs...)
 		}
 
 		if parentNode != nil {
@@ -237,7 +328,7 @@ func buildParseTree(tokens []Token) (*NodeTree, []error) {
 		parentNode.Value = token
 		parentNode.Childreen = nil
 
-		err = ParserError{ Node: parentNode, Err: ERROR_UNEXPECTED_TOKEN_FOR_PARSER }
+		err := ParserError{ Node: parentNode, Err: ERROR_UNEXPECTED_TOKEN_FOR_PARSER }
 		parseErrors = append(parseErrors, err)
 	}
 
@@ -295,6 +386,18 @@ func parseBinaryAndUnaryOperator (operator TokenKind, tokens []Token) (*NodeTree
 
 				// Unary operator must be at the end of the token list
 				if index < len(tokens) - 1 {
+					val := []byte("")
+
+					tokens := tokens[index + 1 : ]
+					for _, to := range tokens {
+						val = append(val, to.Value...)
+					}
+
+					token := Token { Kind: TOKEN_UNKNOWN_TERMINAL, Value: val }
+					parentNode := new(NodeTree)
+					parentNode.Kind = TOKEN_UNKNOWN_TERMINAL
+					parentNode.Value = token
+
 					err := ParserError{ Node: parentNode, Err: ERROR_UNARY_OPERATOR_FOUND_AT_UNEXPECTED_PLACE }
 					parseErrors = append(parseErrors, err)
 				}
@@ -319,20 +422,24 @@ func parseGroupOperator(operator TokenKind, tokens []Token) (*NodeTree, []error)
 
 		if isGroupOpener(left.Kind) {
 			expectedCloser, err := getMatchingOperatorPair(left.Kind)
+
 			var nodeUnique *NodeTree
+			parentNode = new (NodeTree)
 
 			if err == nil &&  expectedCloser.Kind == right.Kind {
 				nodeUnique, parseErrors = buildParseTree(tokens[1:indexLastElement])
 			} else {
 				nodeUnique, parseErrors = buildParseTree(tokens[1:len(tokens)])
 				right = *expectedCloser
+
+				err = ParserError{ Node: parentNode, Err: ERROR_NOT_FOUND_GROUP_CLOSER_OPERATOR_PARSER }
+				parseErrors = append(parseErrors, err)
 			}
 
 			val := bytes.Clone(left.Value)
 			val = append(val, right.Value...)
 			token := Token{ Kind: operator, Value: val }
 
-			parentNode = new (NodeTree)
 			parentNode.Kind = operator
 			parentNode.Value = token
 			parentNode.Childreen = nil
@@ -344,6 +451,31 @@ func parseGroupOperator(operator TokenKind, tokens []Token) (*NodeTree, []error)
 	}
 
 	return parentNode, parseErrors
+}
+
+func parseTerminalToken(tokens []Token) (*NodeTree, error) {
+	token := tokens[0]
+
+	parentNode := new (NodeTree)
+	parentNode.Kind = token.Kind
+	parentNode.Value = token
+	parentNode.Childreen = nil
+
+	if ! isTerminalNode (token.Kind) {
+		err := ParserError{ Node: parentNode, Err: ERROR_EXPECTED_TERMINAL_TOKEN_FOR_PARSER }
+
+		return parentNode, err
+	}
+
+	return parentNode, nil
+}
+
+func isTerminalNode (tk TokenKind) bool {
+	if tk == TOKEN_TERMINAL || tk == TOKEN_IDENTIFIER || tk == TOKEN_DOT {
+		return true
+	}
+
+	return false
 }
 
 func isBinaryOperator(op TokenKind) bool {
